@@ -1,0 +1,6 @@
+{
+  "name": "FileLink Bot — Telegram Serverless",
+  "description": "سامانه حرفه‌ای و رسمی اشتراک‌گذاری فایل تلگرام مبتنی بر Telegram Serverless بومی، پایگاه‌داده اس‌کیوالایت داخلی و شبیه‌ساز زنده",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

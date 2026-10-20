@@ -1,0 +1,12 @@
+{
+  "$schema": "https://tgcloud.dev/schema.json",
+  "name": "filelink-bot",
+  "runtime": "v8-isolate",
+  "entry": {
+    "message": "handlers/message.js",
+    "callback_query": "handlers/callback_query.js"
+  },
+  "database": {
+    "schema": "schema.js"
+  }
+}
