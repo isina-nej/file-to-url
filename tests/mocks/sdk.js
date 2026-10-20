@@ -19,7 +19,16 @@ let autoIncrementCounters = new Map();
 export function resetDatabase() {
   tableStore.clear();
   autoIncrementCounters.clear();
+
+  // Seed default configuration for tests
+  tableStore.set('app_settings', [
+    { id: 1, key: 'STORAGE_CHANNEL_ID', value: '-1001234567890', updated_at: Math.floor(Date.now() / 1000) },
+    { id: 2, key: 'OWNER_TELEGRAM_ID', value: '12345678', updated_at: Math.floor(Date.now() / 1000) },
+    { id: 3, key: 'BOT_USERNAME', value: 'FileLinkBot', updated_at: Math.floor(Date.now() / 1000) },
+  ]);
+  autoIncrementCounters.set('app_settings', 4);
 }
+
 
 function getTable(tableName) {
   if (!tableStore.has(tableName)) {
@@ -107,11 +116,31 @@ function matchesCondition(row, condition) {
     return condition.conditions.some(c => matchesCondition(row, c));
   }
   if (condition.type === 'raw_sql') {
-    // Basic match evaluator for tests
-    return true;
+    let expr = '';
+    for (let i = 0; i < condition.strings.length; i++) {
+      expr += condition.strings[i];
+      if (i < condition.values.length) {
+        const v = condition.values[i];
+        if (v && typeof v === 'object' && v._name) {
+          expr += JSON.stringify(row[v._name] ?? null);
+        } else {
+          expr += JSON.stringify(v);
+        }
+      }
+    }
+    const jsExpr = expr
+      .replace(/\bAND\b/gi, ' && ')
+      .replace(/\bOR\b/gi, ' || ')
+      .replace(/([^><=!])=([^=])/g, '$1===$2');
+    try {
+      return Boolean(new Function('return (' + jsExpr + ')')());
+    } catch (e) {
+      return true;
+    }
   }
   return true;
 }
+
 
 export const db = {
   select() {

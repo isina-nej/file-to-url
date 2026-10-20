@@ -114,7 +114,6 @@ export function getUploadSuccessMessage({
   caption,
   expirationText,
   shareLink,
-  scienceBadge = null,
 }) {
   const safeName = escapeHtml(fileName || 'فایل بدون نام');
   const safeSize = escapeHtml(formatBytes(fileSize));
@@ -125,11 +124,6 @@ export function getUploadSuccessMessage({
   msg += `💾 <b>حجم:</b> ${safeSize}\n`;
   msg += `📝 <b>کپشن:</b> ${safeCaption}\n`;
   msg += `⏳ <b>اعتبار:</b> ${escapeHtml(expirationText)}\n`;
-
-  if (scienceBadge) {
-    msg += `🔬 <b>شناسایی علمی:</b> ${escapeHtml(scienceBadge)}\n`;
-  }
-
   msg += `\n🔗 <b>لینک دریافت مستقیم:</b>\n<code>${escapeHtml(shareLink)}</code>\n\n`;
   msg += `این لینک را برای دوستان یا کانال‌های خود ارسال کنید تا با زدن دکمه Start، فایل را در پیوی دریافت کنند.`;
   return msg;
@@ -170,12 +164,28 @@ export function getFileDetailMessage(file, shareLink) {
   return msg;
 }
 
-export function getStatsMessage({ totalFiles, activeFiles, expiredFiles, totalDownloads, totalBytes }) {
-  return `📊 <b>آمار سامانه اشتراک‌گذاری</b>
+export function getUserStatsMessage({ totalFiles, activeFiles, expiredFiles, totalDownloads, totalBytes }) {
+  return `📊 <b>آمار فایل‌های شما</b>
 
+📁 کل فایل‌های شما: <b>${totalFiles}</b>
+🟢 فایل‌های فعال: <b>${activeFiles}</b>
+⏳ فایل‌های منقضی: <b>${expiredFiles}</b>
+📥 مجموع دفعات دانلود فایل‌های شما: <b>${totalDownloads}</b>
+💾 مجموع حجم فایل‌های شما: <b>${formatBytes(totalBytes)}</b>`;
+}
+
+export function getSystemStatsMessage({ totalFiles, activeFiles, expiredFiles, totalDownloads, totalBytes, totalUsers }) {
+  return `📊 <b>آمار کل سامانه (مخصوص مدیریت)</b>
+
+👥 کل کاربران: <b>${totalUsers}</b>
 📁 کل فایل‌های ثبت‌شده: <b>${totalFiles}</b>
 🟢 فایل‌های فعال: <b>${activeFiles}</b>
 ⏳ فایل‌های منقضی: <b>${expiredFiles}</b>
-📥 مجموع دفعات دانلود موفق: <b>${totalDownloads}</b>
-💾 مجموع حجم فایل‌ها: <b>${formatBytes(totalBytes)}</b>`;
+📥 مجموع کل دانلودهای موفق: <b>${totalDownloads}</b>
+💾 مجموع حجم آرشیو: <b>${formatBytes(totalBytes)}</b>`;
 }
+
+export function getStatsMessage(stats) {
+  return getUserStatsMessage(stats);
+}
+

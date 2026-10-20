@@ -21,7 +21,7 @@ export async function deliverFileByToken({ shareToken, receiverChatId, receiverU
   if (fileRows.length === 0) {
     throw new BotAppError(
       ERROR_CODES.NOT_FOUND,
-      `Share token not found: ${shareToken.substring(0, 8)}...`,
+      `Share token not found: ${shareToken ? shareToken.substring(0, 8) : 'null'}...`,
       '❌ فایل موردنظر پیدا نشد یا لینک معتبر نیست.'
     );
   }
@@ -66,6 +66,7 @@ export async function deliverFileByToken({ shareToken, receiverChatId, receiverU
   let sentMessageId = null;
   let deliverySuccess = false;
   let lastErrorCode = null;
+  const uniqueRequestKey = `req_${now}_${receiverUserId}_${Math.random().toString(36).substring(2, 8)}`;
 
   try {
     const copyResult = await api.copyMessage({
@@ -97,25 +98,28 @@ export async function deliverFileByToken({ shareToken, receiverChatId, receiverU
 
     if (!deliverySuccess) {
       // Record delivery failure
-      await db.insert(fileDeliveries).values({
-        file_id: file.id,
-        receiver_user_id: receiverUserId,
-        request_key: `req_${now}_${receiverUserId}`,
-        requested_at: now,
-        delivered_at: null,
-        sent_message_id: null,
-        status: 'FAILED',
-        error_code: lastErrorCode,
-      });
+      try {
+        await db.insert(fileDeliveries).values({
+          file_id: file.id,
+          receiver_user_id: receiverUserId,
+          request_key: uniqueRequestKey,
+          requested_at: now,
+          delivered_at: null,
+          sent_message_id: null,
+          status: 'FAILED',
+          error_code: lastErrorCode,
+        });
 
-      // Increment error count
-      await db.update(files)
-        .set({
-          delivery_error_count: sql`${files.delivery_error_count} + 1`,
-          last_error_code: lastErrorCode,
-          updated_at: now,
-        })
-        .where(eq(files.id, file.id));
+        await db.update(files)
+          .set({
+            delivery_error_count: sql`${files.delivery_error_count} + 1`,
+            last_error_code: lastErrorCode,
+            updated_at: now,
+          })
+          .where(eq(files.id, file.id));
+      } catch (dbErr) {
+        console.error('Failed to record delivery failure in DB:', dbErr);
+      }
 
       logEvent({
         eventType: 'DELIVERY_FAILURE',
@@ -136,26 +140,29 @@ export async function deliverFileByToken({ shareToken, receiverChatId, receiverU
     }
   }
 
-  // 7. Atomic update on successful delivery
-  await db.update(files)
-    .set({
-      download_count: sql`${files.download_count} + 1`,
-      last_download_at: now,
-      updated_at: now,
-    })
-    .where(eq(files.id, file.id));
+  // 7. Atomic update on successful delivery (wrapped so metric failure does not falsely tell user file was not sent)
+  try {
+    await db.update(files)
+      .set({
+        download_count: sql`${files.download_count} + 1`,
+        last_download_at: now,
+        updated_at: now,
+      })
+      .where(eq(files.id, file.id));
 
-  // 8. Record successful delivery
-  await db.insert(fileDeliveries).values({
-    file_id: file.id,
-    receiver_user_id: receiverUserId,
-    request_key: `req_${now}_${receiverUserId}`,
-    requested_at: now,
-    delivered_at: now,
-    sent_message_id: sentMessageId,
-    status: 'SUCCESS',
-    error_code: null,
-  });
+    await db.insert(fileDeliveries).values({
+      file_id: file.id,
+      receiver_user_id: receiverUserId,
+      request_key: uniqueRequestKey,
+      requested_at: now,
+      delivered_at: now,
+      sent_message_id: sentMessageId,
+      status: 'SUCCESS',
+      error_code: null,
+    });
+  } catch (metricsErr) {
+    console.error('Delivery succeeded but metrics record failed:', metricsErr);
+  }
 
   logEvent({
     eventType: 'DELIVERY_SUCCESS',

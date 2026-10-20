@@ -1,27 +1,23 @@
 /**
  * @file Application Configuration
- * @description In Telegram Serverless runtime, configuration is kept in SQLite (app_settings)
- * or fallback defaults. No process.env in V8 Isolate.
+ * @description Loads runtime configuration from SQLite (app_settings) in Telegram Serverless.
+ * Implements strict fail-closed behavior without insecure dummy placeholders.
  */
 import { db } from 'sdk';
 import { eq } from 'sdk/db';
 import { appSettings } from '../schema.js';
+import { ERROR_CODES } from './constants.js';
+import { BotAppError } from './errors.js';
 
-const DEFAULT_CONFIG = {
-  STORAGE_CHANNEL_ID: '-1001234567890',
-  OWNER_TELEGRAM_ID: '12345678',
-  BOT_USERNAME: 'FileLinkBot',
-};
-
-// In-memory request cache for the isolate lifetime
+// In-memory request cache for isolate lifetime
 let cachedSettings = null;
 let cacheTime = 0;
-const CACHE_TTL_MS = 60000;
+const CACHE_TTL_MS = 30000;
 
 export async function getConfig(key) {
   const now = Date.now();
   if (cachedSettings && (now - cacheTime < CACHE_TTL_MS)) {
-    return cachedSettings[key] ?? DEFAULT_CONFIG[key] ?? null;
+    return cachedSettings[key] ?? null;
   }
 
   try {
@@ -32,10 +28,15 @@ export async function getConfig(key) {
     }
     cachedSettings = map;
     cacheTime = now;
-    return cachedSettings[key] ?? DEFAULT_CONFIG[key] ?? null;
+    return cachedSettings[key] ?? null;
   } catch (err) {
-    // If DB read fails during bootstrap, use default
-    return DEFAULT_CONFIG[key] ?? null;
+    // If DB throws error, propagate as database error rather than returning fake values
+    throw new BotAppError(
+      ERROR_CODES.DATABASE_ERROR,
+      `Failed to read app_settings from database: ${err?.message || ''}`,
+      '⚠️ دسترسی به تنظیمات سیستم با خطا مواجه شد. لطفاً بررسی کنید دیتابیس در دسترس باشد.',
+      err
+    );
   }
 }
 
@@ -59,6 +60,7 @@ export async function setConfig(key, value) {
     }
     return true;
   } catch (err) {
+    console.error(`Failed to setConfig ${key}:`, err);
     return false;
   }
 }

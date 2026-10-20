@@ -34,7 +34,7 @@ import {
   getFileDetailMessage,
 } from '../lib/messages.js';
 import { files } from '../schema.js';
-import { SESSION_STEP, LIMITS, ERROR_CODES } from '../lib/constants.js';
+import { SESSION_STEP, FILE_STATUS, LIMITS, ERROR_CODES } from '../lib/constants.js';
 import { BotAppError } from '../lib/errors.js';
 import { logEvent } from '../lib/logging.js';
 
@@ -89,9 +89,13 @@ export default async function handleCallbackQuery(callbackQuery, ctx) {
         return;
       }
 
-      // Explicitly set empty string to remove original caption if any
+      // Explicitly set empty string to remove original caption and advance status to WAITING_EXPIRY
       await db.update(files)
-        .set({ caption: '', updated_at: Math.floor(Date.now() / 1000) })
+        .set({
+          caption: '',
+          status: FILE_STATUS.WAITING_EXPIRY,
+          updated_at: Math.floor(Date.now() / 1000),
+        })
         .where(eq(files.id, activeSession.file_id));
 
       if (chatId && message?.message_id) {

@@ -21,7 +21,7 @@ export async function createFileDraft({
 }) {
   const now = Math.floor(Date.now() / 1000);
   const shareToken = await generateUniqueShareToken();
-  const { mediaMetadataJson, scienceBadge } = extractMediaMetadata(parsedMedia);
+  const { mediaMetadataJson } = extractMediaMetadata(parsedMedia);
   const telegramMetadataJson = extractTelegramMetadata(rawMessage);
 
   const newFile = {
@@ -70,7 +70,6 @@ export async function createFileDraft({
   return {
     ...newFile,
     id: insertedId,
-    scienceBadge,
   };
 }
 
@@ -174,8 +173,45 @@ export async function toggleFileStatus(fileId, userId, isOwner = false) {
   );
 }
 
+export async function getUserStats(userId) {
+  const userFiles = await db.select()
+    .from(files)
+    .where(eq(files.owner_user_id, userId));
+
+  const now = Math.floor(Date.now() / 1000);
+  let activeFiles = 0;
+  let expiredFiles = 0;
+  let totalDownloads = 0;
+  let totalBytes = 0;
+
+  for (const f of userFiles) {
+    if (f.status === FILE_STATUS.ACTIVE) {
+      if (isFileExpired(f, now)) {
+        expiredFiles++;
+      } else {
+        activeFiles++;
+      }
+    } else if (f.status === FILE_STATUS.EXPIRED) {
+      expiredFiles++;
+    }
+    totalDownloads += (f.download_count || 0);
+    totalBytes += (f.file_size_bytes || 0);
+  }
+
+  return {
+    totalFiles: userFiles.length,
+    activeFiles,
+    expiredFiles,
+    totalDownloads,
+    totalBytes,
+  };
+}
+
 export async function getSystemStats() {
-  const allFiles = await db.select().from(files);
+  const [allFiles, allUsers] = await Promise.all([
+    db.select().from(files),
+    db.select().from(users),
+  ]);
   const now = Math.floor(Date.now() / 1000);
 
   let activeFiles = 0;
@@ -203,5 +239,6 @@ export async function getSystemStats() {
     expiredFiles,
     totalDownloads,
     totalBytes,
+    totalUsers: allUsers.length,
   };
 }

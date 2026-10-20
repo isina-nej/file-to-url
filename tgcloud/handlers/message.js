@@ -189,9 +189,13 @@ export default async function handleMessage(message, ctx) {
           return;
         }
 
-        // Save caption on the draft file
+        // Save caption on the draft file and advance status to WAITING_EXPIRY
         await db.update(files)
-          .set({ caption: text, updated_at: Math.floor(Date.now() / 1000) })
+          .set({
+            caption: text,
+            status: FILE_STATUS.WAITING_EXPIRY,
+            updated_at: Math.floor(Date.now() / 1000),
+          })
           .where(eq(files.id, activeSession.file_id));
 
         // Advance to WAITING_EXPIRY

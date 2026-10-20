@@ -1,7 +1,7 @@
 /**
  * @file Secure Deep Link and Share Token Generator
  * @description Generates 128-bit entropy cryptographically secure URL-safe tokens
- * adhering to Telegram's 64-character start parameter limit.
+ * adhering to Telegram's 64-character start parameter limit. Uses rejection sampling to eliminate modulo bias.
  */
 import { db } from 'sdk';
 import { eq } from 'sdk/db';
@@ -12,23 +12,30 @@ const BASE62_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuv
 
 /**
  * Generates a cryptographically secure random string with minimum 128 bits of entropy.
- * 22 base62 characters provide log2(62^22) ≈ 131 bits of entropy.
+ * Uses rejection sampling (limit 248 = 62 * 4) to ensure strictly uniform distribution without modulo bias.
  */
-export function generateSecureToken(length = 22) {
-  // Use crypto API available in V8 Isolate runtime
+export function generateSecureToken(length = 24) {
   const cryptoObj = globalThis.crypto;
   if (!cryptoObj || typeof cryptoObj.getRandomValues !== 'function') {
     throw new Error('SECURITY_BLOCKER: Cryptographically secure RNG (crypto.getRandomValues) is not available in runtime.');
   }
 
-  const randomBytes = new Uint8Array(length);
-  cryptoObj.getRandomValues(randomBytes);
+  const chars = [];
+  const chunkSize = Math.max(length * 2, 64);
+  const buffer = new Uint8Array(chunkSize);
 
-  let token = '';
-  for (let i = 0; i < length; i++) {
-    token += BASE62_CHARS[randomBytes[i] % BASE62_CHARS.length];
+  while (chars.length < length) {
+    cryptoObj.getRandomValues(buffer);
+    for (let i = 0; i < buffer.length && chars.length < length; i++) {
+      const byte = buffer[i];
+      // 248 is the largest multiple of 62 that is <= 256
+      if (byte < 248) {
+        chars.push(BASE62_CHARS[byte % 62]);
+      }
+    }
   }
-  return token;
+
+  return chars.join('');
 }
 
 /**
@@ -61,7 +68,10 @@ export async function generateUniqueShareToken(maxAttempts = 5) {
  * Constructs the full Telegram deep link.
  */
 export function buildDeepLink(botUsername, shareToken) {
-  const cleanUsername = String(botUsername || 'FileLinkBot').replace(/^@/, '');
+  const cleanUsername = String(botUsername || '').trim().replace(/^@/, '');
+  if (!cleanUsername) {
+    return `https://t.me/share/url?url=&start=${shareToken}`;
+  }
   return `https://t.me/${cleanUsername}?start=${shareToken}`;
 }
 

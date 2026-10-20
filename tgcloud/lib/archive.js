@@ -1,7 +1,7 @@
 /**
  * @file Archive Service
  * @description Copies uploaded files to the private storage channel via api.copyMessage.
- * Zero file downloading/re-uploading to maintain native serverless lightweight efficiency.
+ * Implements Compare-And-Swap (CAS) to strictly prevent duplicate archiving across concurrent requests.
  */
 import { api, db, BotApiError } from 'sdk';
 import { eq, and } from 'sdk/db';
@@ -21,27 +21,42 @@ export async function archiveFileToChannel(fileId) {
 
   const file = fileRows[0];
 
-  // Prevent double archiving
+  // 1. Prevent double archiving if already active
   if (file.status === FILE_STATUS.ACTIVE && file.storage_message_id) {
     return file;
   }
 
+  // 2. Storage channel configuration check (Fail closed if not configured)
   const storageChannelId = await getConfig('STORAGE_CHANNEL_ID');
-  if (!storageChannelId) {
+  if (!storageChannelId || String(storageChannelId).trim() === '') {
     throw new BotAppError(
       ERROR_CODES.STORAGE_UNAVAILABLE,
-      'Storage channel ID is not configured.',
+      'Storage channel ID is not configured in app settings.',
       '⚠️ شناسه کانال ذخیره‌سازی تنظیم نشده است. لطفاً با ادمین ربات تماس بگیرید.'
     );
   }
 
   const now = Math.floor(Date.now() / 1000);
 
-  // Transition state to ARCHIVING
-  await db.update(files)
+  // 3. Compare-And-Swap (CAS): Claim archive operation atomically
+  const claimResult = await db.update(files)
     .set({ status: FILE_STATUS.ARCHIVING, updated_at: now })
     .where(and(eq(files.id, fileId), eq(files.status, FILE_STATUS.WAITING_EXPIRY)));
 
+  // If 0 rows were updated, another concurrent request already claimed it or status is invalid
+  if (claimResult && typeof claimResult.rowsAffected === 'number' && claimResult.rowsAffected === 0) {
+    const recheck = await db.select().from(files).where(eq(files.id, fileId)).limit(1);
+    if (recheck[0]?.status === FILE_STATUS.ACTIVE) {
+      return recheck[0];
+    }
+    throw new BotAppError(
+      ERROR_CODES.INVALID_STATE,
+      `Archive claim failed: file #${fileId} is currently in status ${recheck[0]?.status || 'UNKNOWN'}.`,
+      '⚠️ عملیات ذخیره‌سازی این فایل در حال حاضر در حال انجام است یا وضعیت معتبر ندارد.'
+    );
+  }
+
+  // 4. Perform Telegram api.copyMessage
   try {
     const copyPayload = {
       chat_id: storageChannelId,
@@ -49,28 +64,27 @@ export async function archiveFileToChannel(fileId) {
       message_id: file.source_message_id,
     };
 
-    // If explicit caption is set, pass it; if empty string, it clears original caption
+    // Explicit caption: pass if set; empty string clears original caption
     if (file.caption !== null && file.caption !== undefined) {
       copyPayload.caption = file.caption;
     }
 
-    // Call Telegram Bot API copyMessage
     const copyResult = await api.copyMessage(copyPayload);
 
     if (!copyResult || !copyResult.message_id) {
-      throw new Error('Invalid response from copyMessage: missing message_id');
+      throw new Error('Telegram Bot API copyMessage returned empty or invalid response.');
     }
 
     const storageMessageId = copyResult.message_id;
     const publishedAt = Math.floor(Date.now() / 1000);
 
-    // Calculate final expires_at if expiration_days was selected
+    // Calculate final expires_at
     let expiresAt = null;
     if (file.expiration_days) {
       expiresAt = publishedAt + (file.expiration_days * 86400);
     }
 
-    // Persist storage metadata and activate file
+    // 5. Activate file with storage identifiers
     await db.update(files)
       .set({
         storage_chat_id: Number(storageChannelId),
@@ -102,9 +116,11 @@ export async function archiveFileToChannel(fileId) {
       expires_at: expiresAt,
     };
   } catch (err) {
-    const errorCode = err instanceof BotApiError ? `BOT_API_${err.code || 'ERROR'}` : 'ARCHIVE_FAILED';
+    const isBotApiError = err instanceof BotApiError;
+    const errorCode = isBotApiError ? `BOT_API_${err.code || 'ERROR'}` : 'ARCHIVE_FAILED';
     const errorDetails = err?.description || err?.message || 'Unknown archive error';
 
+    // Transition to ARCHIVE_FAILED so state machine is not stuck in ARCHIVING
     await db.update(files)
       .set({
         status: FILE_STATUS.ARCHIVE_FAILED,
